@@ -30,7 +30,7 @@ type thumbnail struct {
 }
 
 var videoThumbnails = map[uuid.UUID]thumbnail{}
-
+var port string
 func main() {
 	godotenv.Load(".env")
 
