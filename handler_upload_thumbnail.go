@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
@@ -46,50 +47,69 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
 		return
 	}
-	defer file.Close() // where should defer go?
+	defer file.Close()
 
-	// get media type
-	mediaType := header.Header.Get("Content-Type")
-
+	// read image data
 	imageData, err := io.ReadAll(file)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to read file", err)
+		return
 	}
 
+	// used to get extension type
+	mediaType := header.Header.Get("Content-Type")
+
+	// create asset path 
+	assetPath, err := cfg.getAssetPath(videoID, mediaType)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Something went wrong when getting the asset path", err)
+	}
+
+	// Create the /assets disk path
+	assetDiskPath := cfg.getAssetDiskPath(assetPath)
+
+	// Create the file where we are going to copy image data
+	imageFileCreate, err := os.Create(assetDiskPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Something went wrong when trying to create the file at path %s", assetDiskPath), err)
+		return
+	}
+	defer imageFileCreate.Close()
+
+	// Copy image data to newly created file
+	err = os.WriteFile(assetDiskPath, imageData, 0644)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Something went wrong when trying to copy raw image bytes to path %s", assetDiskPath), err)
+		return
+	}
+
+	// Get video for updating metadata
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Video not found", err)
+		return
 	}
 
 	// Check to see if this user is owner of this video
 	if video.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "User does not own this video", err)
+		return
 	}
 
-	// Update video thumbnail
-	newThumbnailUrl := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port,videoID)
-	video.ThumbnailURL = &newThumbnailUrl 
-
-	// Update global videoThumbnail's struct
-	// with image data and mediaType
-	videoThumbnails[videoID] = thumbnail{
-		data: imageData,
-		mediaType: mediaType,
-	}
+	// create URL
+	thumbnailURL := cfg.getAssetURL(assetPath)
+	video.ThumbnailURL = &thumbnailURL
 
 	// Update the video in the database if everything is 
-	// correct up until now
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
-		delete(videoThumbnails, videoID)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't updarte video", err)
 		return
 	}
 
-
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
 	// Respond with video data in JSON format
-	//  marshalled by  database.Video
+	// marshalled by  database.Video
 	respondWithJSON(w, http.StatusOK, database.Video(video))
 }
