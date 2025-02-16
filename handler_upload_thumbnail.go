@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -69,22 +71,34 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// BEGIN
+	// Create the /assets disk path
+	// Create new file path using crypto/rand.Read 
+	// to fill a 32-byte slice with random bytes
+
+	// TODO: Separate this into its own function for use elsewhere
+	// Used for cache busting
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error generating random bytes", err)
+		return
+	}
+
 	// create asset path 
-	assetPath, err := cfg.getAssetPath(videoID, mediaType)
+	assetPath, err := cfg.getAssetPath(base64.RawURLEncoding.EncodeToString(randomBytes), mediaType)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Something went wrong when getting the asset path", err)
 	}
-
-	// Create the /assets disk path
 	assetDiskPath := cfg.getAssetDiskPath(assetPath)
-
+	
 	// Create the file where we are going to copy image data
 	imageFileCreate, err := os.Create(assetDiskPath)
+	defer imageFileCreate.Close()
+
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Something went wrong when trying to create the file at path %s", assetDiskPath), err)
 		return
 	}
-	defer imageFileCreate.Close()
 
 	// Copy image data to newly created file
 	err = os.WriteFile(assetDiskPath, imageData, 0644)
@@ -117,7 +131,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+	fmt.Printf("Uploading thumbnail for video:%s\nBy user: %s\nSaving to: %s\n", videoID, userID, assetDiskPath)
 
 	// Respond with video data in JSON format
 	// marshalled by  database.Video
