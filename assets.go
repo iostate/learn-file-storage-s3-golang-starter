@@ -5,8 +5,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
-
-	"github.com/google/uuid"
+	// "github.com/google/uuid"
 )
 
 func (cfg apiConfig) ensureAssetsDir() error {
@@ -16,12 +15,12 @@ func (cfg apiConfig) ensureAssetsDir() error {
 	return nil
 }
 
-func (cfg apiConfig) getAssetPath(videoID uuid.UUID, mediaType string) (string, error) {
-	exts, err := mime.ExtensionsByType(mediaType); 
-	if err != nil || len(exts) == 0 {
-		return "", fmt.Errorf("Extension not found")
+func (cfg apiConfig) getAssetPath(videoID string, mediaType string) (string, error) {
+	ext, err := cfg.getExtensionType(mediaType)
+	if err != nil {
+		fmt.Printf("%s", err)
 	}
-	return fmt.Sprintf("%s%s", videoID, exts[0]), nil
+	return fmt.Sprintf("%s%s", videoID, ext), nil
 }
 
 func (cfg apiConfig) getAssetDiskPath(assetPath string) string {
@@ -34,4 +33,19 @@ func (cfg apiConfig) mediaTypeToExt(mediaType string) string {
 
 func (cfg apiConfig) getAssetURL(assetPath string) string {
 	return fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, assetPath)
+}
+
+func (cfg apiConfig) getExtensionType(mediaType string) (string, error) {
+	candidates, err := mime.ExtensionsByType(mediaType); 
+	// ExtensionsByType will return a slice of all possible extensions
+	// for a filetype, if one of them is .mp4, for videos, make it return that
+	for _, ext := range candidates {
+		if ext == ".mp4" {
+			return ext, nil
+		}
+	}
+	if err != nil || len(candidates) == 0 {
+		return "", fmt.Errorf("Extension not found")
+	}
+	return candidates[0], nil
 }
