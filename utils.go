@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 
@@ -94,6 +98,25 @@ func checkFileContainsString(filePath string, searchString string) (bool, error)
 
 	// Convert to string and check for "moov"
 	return strings.Contains(string(data[:n]), searchString), nil
+}
+
+
+// Create a new generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) function.
+// Use the SDK to create a s3.PresignClient with s3.NewPresignClient
+// Use the client's .PresignGetObject() method with s3.WithPresignExpires as a functional option.
+// Return the .URL field of the v4.PresignedHTTPRequest created by .PresignGetObject()
+func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+
+	presignClient := s3.NewPresignClient(s3Client)
+	presignedURL, err := presignClient.PresignGetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	}, s3.WithPresignExpires(expireTime))
+	if err != nil {
+		return "", fmt.Errorf("Error creating presigned URL: %w", err)
+	}
+
+	return presignedURL.URL, nil
 }
 
 // Check to see if moov atom got moved to start of a file

@@ -8,6 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 )
 
 func (cfg apiConfig) ensureAssetsDir() error {
@@ -91,4 +95,33 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	}
 
 	return "", fmt.Errorf("Could not determine aspect ratio")
+}
+
+
+// Create a new (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) method:
+// It should take a video database.Video as input and return a database.Video with the VideoURL field set to a presigned URL and an error (to be returned from the handler)
+// It should first split the video.VideoURL on the comma to get the bucket and key
+// Then it should use generatePresignedURL to get a presigned URL for the video
+// Set the VideoURL field of the video to the presigned URL and return the updated video
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+
+	if video.VideoURL == nil {
+		return database.Video{}, fmt.Errorf("video.VideoURL is nil or empty")
+	}
+
+	// Split video.VideoURL by comma to get bucket and key
+	words := strings.Split(*video.VideoURL, ",")
+	if len(words) != 2 {
+		return database.Video{}, fmt.Errorf("invalid VideoURL format, expected 'bucket,key'")
+	}
+	bucket := words[0]
+	key := words[1]
+
+	presignedURL, err := generatePresignedURL(cfg.s3client, bucket, key, 3600 * time.Second)
+	if err != nil {
+		return database.Video{}, fmt.Errorf("failed to generate presigned URL: %w", err)
+	}
+	video.VideoURL = &presignedURL
+	
+	return video, nil
 }
