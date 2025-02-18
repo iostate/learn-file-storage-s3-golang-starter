@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"mime"
 	"os"
+	"os/exec"
 	"path/filepath"
-	// "github.com/google/uuid"
 )
 
 func (cfg apiConfig) ensureAssetsDir() error {
@@ -48,4 +50,45 @@ func (cfg apiConfig) getExtensionType(mediaType string) (string, error) {
 		return "", fmt.Errorf("Extension not found")
 	}
 	return candidates[0], nil
+}
+
+type FFProbeOutput struct {
+	Streams []struct {
+		Width	int		`json:"width`
+		Height	int		`json:"height`
+		Codec 	string	`json:"codec"`
+	}`json:"streams"`
+}
+
+// Placing this here since we are passing it an asset disk path
+func getVideoAspectRatio(filePath string) (string, error) {
+	// run exec.Command to run ffprobe -v error -print_format json -show_streams PATH_TO_VIDEO
+	cmd := exec.Command("ffprobe",  "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	// write to buffer
+	var b bytes.Buffer
+	cmd.Stdout = &b
+
+	// Run command
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("Failed to run ffprobe: %w", err)
+	}
+
+	// Unmarshal JSON output
+	var output FFProbeOutput
+	if err := json.Unmarshal(b.Bytes(), &output); err != nil {
+		return "", fmt.Errorf("Failed to unmarshal ffprobe out: %w", err)
+	}
+
+	if len(output.Streams) > 0 {
+		width := output.Streams[0].Width
+		height := output.Streams[0].Height
+
+		if width > 0 && height > 0 {
+			gcd := GCD(int(width), int(height))
+			aspectRatio := closestAspectRatio(width/gcd,height/gcd)
+			return fmt.Sprintf("%s", aspectRatio), nil
+		}
+	}
+
+	return "", fmt.Errorf("Could not determine aspect ratio")
 }

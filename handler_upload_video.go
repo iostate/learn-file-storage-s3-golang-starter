@@ -94,13 +94,10 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Unable to create temporary file", err)
 		return
 	}
-
-	// Defer closing and removing the temporary file.
 	defer func() {
 		tempFile.Close()
 		os.Remove(tempFile.Name())
 	}()
-	
 
 	// Copy the request body into the temporary file.
 	if _, err := io.Copy(tempFile, file); err != nil {
@@ -112,14 +109,52 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Failed to reset file pointer", err)
 		return
 	}
+
+	// Create processed video using the temp file
+	processedVideoPath, err := processVideoForFastStart(tempFile.Name()) 
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to process video", err)
+		return
+	}
+
+	// Open file for processing
+	processedVideoFile, err := os.Open(processedVideoPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to open processed video for upload", err)
+		return
+	}
+	defer processedVideoFile.Close()
+	contains, err := checkFileContainsString(processedVideoFile.Name(), "moov")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	if contains {
+		fmt.Println("The file contains 'moov'.")
+	} else {
+		fmt.Println("The file does NOT contain 'moov'.")
+	}
 	
+
+	// append aspect ratio orientation to end of string
+	aspectRatio, err := getVideoAspectRatio(processedVideoFile.Name())
+	if err != nil {
+		fmt.Printf("Error getting aspect ratio of file %s: %v", processedVideoFile.Name(), err)
+	}
+
+	// Create directory bucket string using aspect ratio
+	aspectRatioOrientation := getAspectRatioOrientation(aspectRatio)
+	s3KeyWithAspectRatioOrientation := createDirectoryBucketPrefix(aspectRatioOrientation) + s3Key
+
+	// Uploaded processed video to s3
 	putObjectInput :=  &s3.PutObjectInput{
 		Bucket: aws.String(cfg.s3Bucket),
-		Key: aws.String(s3Key),
-		Body: tempFile,
+		Key: aws.String(s3KeyWithAspectRatioOrientation),
+		Body: processedVideoFile,
 		ContentType: aws.String(mediaType), 
 	}
-	// Put file into S3
+
 	_, err = cfg.s3client.PutObject(r.Context(), putObjectInput)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to upload to S3", err)
@@ -129,7 +164,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// Update VideoURL with the URL of the video at S3
 	awsRegion := cfg.s3Region
 	awsBucketName := cfg.s3Bucket
-	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", awsBucketName, awsRegion, s3Key)
+	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", awsBucketName, awsRegion, s3KeyWithAspectRatioOrientation)
 	video.VideoURL = &url
 
 	err = cfg.db.UpdateVideo(video)
@@ -137,9 +172,10 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
 		return
 	}
-
-	fmt.Println("uploading video ID: ", videoID, "\nBy user:", userID, "Saving to :", *video.ThumbnailURL + "\n")
-
+	
+	fmt.Println("uploading video ID: ", videoID, "\nBy user:", userID, "\nSaving to :", *video.VideoURL + "\n")
+	
+	os.Remove(processedVideoPath)
 	// Respond with video data in JSON format
 	// marshalled by  database.Video
 	respondWithJSON(w, http.StatusOK, database.Video(video))
